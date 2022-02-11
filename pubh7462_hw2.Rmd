@@ -1,0 +1,117 @@
+---
+title: "PubH 7462 HW2"
+author: "Seth Bergstedt"
+date: "2/9/2022"
+output: github_document
+---
+
+# Problem 3
+
+```{r setup,message=FALSE}
+library(tidyverse)
+library(gt)
+```
+
+### 3.1
+
+```{r input}
+brfss = read.csv("./data/brfss_smart_2010.csv")
+
+brfss = brfss %>% janitor::clean_names()
+
+brfss_cleaned = brfss %>%
+  mutate(county = str_replace(str_extract(brfss$locationdesc,"- .+"),"- ","")) %>%
+  filter(topic %in% c("Overall Health")) %>%
+  dplyr::select(year,locationabbr,county,response,sample_size,data_value) %>%
+  rename("state" = locationabbr,
+         "prop_response" = data_value) 
+brfss_cleaned$state = as.factor(brfss_cleaned$state)
+brfss_cleaned$county = as.factor(brfss_cleaned$county)
+brfss_cleaned$response = as.factor(brfss_cleaned$response)
+```
+
+### 3.2
+
+The cleaned BRFSS dataset contains `r dim(brfss_cleaned)[1]` observations, each of which is a participating US county, and `r dim(brfss_cleaned)[2]` variables which include year, state, county name, self-reported overall health category (excellent, very good, good, fair, or poor), number of respondents within the given overall health category by county, and the percent of respondents reporting the given overall health category by county. Noteable information: there are `r sum(is.na(brfss_cleaned))`` missing observations in this dataset (each of which comes from the proportion response variable).
+
+### 3.3
+
+##### 3.3.1
+
+```{r 3.3.1}
+brfss_04 = brfss_cleaned %>%
+  filter(year %in% 2004) %>%
+  dplyr::select(state,county) %>%
+  distinct() %>%
+  group_by(state) %>%
+  summarize(state_count = n())
+```
+
+In 2004, there were `r sum(brfss_04$state_count %in% 6)` states that were observed in exactly different 6 locations. 
+
+##### 3.3.2
+
+```{r 3.3.2}
+brfss_plot = brfss_cleaned %>%
+  filter(year %in% 2002:2010) %>%
+  group_by(year,state) %>%
+  distinct() %>%
+  summarize(state_count = n()) %>%
+  mutate(state = fct_reorder(state,state_count,mean,.desc = TRUE))
+
+ggplot(brfss_plot) + 
+  geom_line(aes(x = year,y = state_count,group = state,color = state)) + 
+  labs(title = "Number of Participating Counties by State from 2002-2010",
+       x = "Year",y = "Number of Participating Counties",color = "State")
+```
+
+It appears that number of participating counties generally increases over time. That said, this increase is not consistent (many states might decrease, some state fluctuate wildly from year to year, my impression may be the result of the fact that the states with the highest participation increase their number of participating counties while the rest of the states don't change much). Altogether, the state with the highest mean number of locations from 2002 to 2010 is Pennsylvania. Worth noting is that the strange outlying observations come from Florida, which has the fifth highest mean. 
+
+##### 3.3.3
+
+```{r 3.3.3}
+brfss_mn = brfss_cleaned %>%
+  filter(year %in% c(2002,2006,2010),state %in% "MN") %>%
+  group_by(county,year) %>%
+  mutate(num_in_county = sum(sample_size)) %>%
+  pivot_wider(id_cols = c("year","county","num_in_county"),
+              names_from = "response",
+              values_from = "prop_response") %>%
+  ungroup()
+
+brfss_mn %>%
+  mutate(across(.cols = num_in_county:Poor,
+                .fns = list(mean = mean,sd = sd),
+                .names = "{.col}_{.fn}")) %>%
+  dplyr::select(num_in_county_mean,num_in_county_sd,
+                Excellent_mean,Excellent_sd,
+                "Very good_mean","Very good_sd",
+                Good_mean,Good_sd,
+                Fair_mean,Fair_sd,
+                Poor_mean,Poor_sd) %>%
+  unique() %>%
+  round(digits = 3) %>%
+  gt() %>%
+  tab_header(title = "Means and SDs of County Numbers and Overall Health Response Proportions")
+```
+
+##### 3.3.4
+
+```{r 3.3.4}
+brfss_longer = brfss_mn %>%
+  pivot_longer(cols = c("Excellent","Very good","Good","Fair","Poor"),
+               names_to = "Overall_Health",
+               values_to = "Proportion_Answered") %>%
+  mutate(Number_Answered = num_in_county * Proportion_Answered / 100,
+         county_year = str_c(county," ",year),
+         Overall_Health = fct_relevel(Overall_Health,
+                                      c("Excellent","Very good",
+                                        "Good","Fair","Poor")))
+
+ggplot(brfss_longer) +
+  geom_line(aes(x = Overall_Health,y = Number_Answered,group = county_year,color = county,linetype = factor(year))) + 
+  labs(title = "Self-Reported Overall Health in MN by County",
+       x = "Overall Health",y = "Number Answered",
+       color = "County",linetype = "Year")
+```
+
